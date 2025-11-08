@@ -1,4 +1,4 @@
-""" Demo Code for Position Control """
+""" Demo Code for Torque Control """
 from TMotorAPI import Motor, MotorConfig
 
 # Define Motor Setup Config
