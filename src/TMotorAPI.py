@@ -57,8 +57,8 @@ class MotorConfig:
     Motor configuration with camelCase naming
     
     Attributes:
-        motorType: Motor model (e.g., 'AK80-64', 'AK80-9', 'AK80-10', 'AK70-10')
-        motorId: CAN ID (1-32)
+        motorType: Motor model (e.g., 'AK80-64', 'AK80-9', 'AK70-10')
+        motorId: CAN ID (0-127)
         canInterface: CAN interface name for setup (e.g., 'can0')
         bitrate: CAN bitrate for setup (default: 1000000)
         autoInit: Auto initialize CAN interface
@@ -135,7 +135,6 @@ class CANInterface:
             logging.info(f"✓ CAN {_interface} ready (bitrate: {_bitrate})")
             return True
         except subprocess.CalledProcessError as e:
-            # stderr 디코딩해 주면 디버깅 좋음
             err = getattr(e, "stderr", b"")
             logging.error(f"Failed to setup CAN: {err.decode(errors='ignore')}")
             return False
