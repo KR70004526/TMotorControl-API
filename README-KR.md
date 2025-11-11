@@ -1,29 +1,30 @@
-# TMotor Control API v2.0
+# TMotorAPI
 
-AK 시리즈 T모터 전문 제어 라이브러리 (MIT CAN 프로토콜)
+MIT CAN 프로토콜을 사용하여 AK 시리즈 T-Motor를 제어하는 고수준 Python 라이브러리
 
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## 🌟 주요 기능
 
+- **간단하고 직관적인 API**: TMotorCANControl 기반의 사용하기 쉬운 고수준 인터페이스
 - **4가지 제어 모드**: Trajectory, Velocity, Torque, Impedance 제어
-- **간단한 API**: 사용하기 쉬운 고수준 인터페이스
-- **Context Manager**: 자동 전원 관리
-- **다중 모터 지원**: 여러 모터의 동기화 제어
+- **Context Manager 지원**: Python `with` 문을 통한 자동 전원 관리
+- **다중 모터 제어**: `MotorGroup`으로 여러 모터 동기화
+- **타입 힌트**: IDE 지원 향상을 위한 완전한 타입 어노테이션
+- **상세 로깅**: 디버깅을 위한 포괄적인 작동 로그
 - **전원 모니터링**: 모터 가동 시간 및 연결 상태 추적
-- **타입 힌트**: 완전한 타입 주석으로 IDE 지원 강화
-- **상세한 로깅**: 자세한 작동 로그
+- **자동 CAN 설정**: 자동 CAN 인터페이스 초기화 (옵션)
 
 ## 📋 목차
 
-- [설치](#설치)
-- [빠른 시작](#빠른-시작)
-- [제어 모드](#제어-모드)
-- [API 레퍼런스](#api-레퍼런스)
-- [예제](#예제)
-- [FAQ](#faq)
-- [문제 해결](#문제-해결)
+- [설치](#-설치)
+- [빠른 시작](#-빠른-시작)
+- [제어 모드](#-제어-모드)
+- [API 레퍼런스](#-api-레퍼런스)
+- [예제](#-예제)
+- [FAQ](#-faq)
+- [문제 해결](#-문제-해결)
 
 ## 🚀 설치
 
@@ -33,11 +34,13 @@ AK 시리즈 T모터 전문 제어 라이브러리 (MIT CAN 프로토콜)
 # TMotorCANControl 라이브러리 설치
 pip install TMotorCANControl
 
-# CAN 인터페이스 설정 (한 번만)
+# CAN 유틸리티 설치 (Linux)
 sudo apt-get install can-utils
 ```
 
 ### Sudo 권한 설정 (권장)
+
+비밀번호 입력 없이 자동 CAN 인터페이스 설정을 허용하려면:
 
 ```bash
 sudo visudo
@@ -45,32 +48,36 @@ sudo visudo
 your_username ALL=(ALL) NOPASSWD: /sbin/ip
 ```
 
-### 라이브러리 설치
+### TMotorAPI 설치
 
 ```bash
-# tmotor_control_final.py를 프로젝트에 복사
-cp tmotor_control_final.py your_project/
+# 저장소 복제
+git clone https://github.com/KR70004526/TMotorAPI.git
+cd TMotorAPI
+
+# 프로젝트에 복사
+cp src/TMotorAPI.py your_project/
 ```
 
 ## ⚡ 빠른 시작
 
-### 기본 사용법
+### Context Manager를 사용한 기본 사용법
 
 ```python
-from tmotor_control_final import Motor
+from TMotorAPI import Motor
 
 # Context manager를 사용한 모터 생성 및 사용 (권장)
 with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 이 안에서는 모터 전원이 켜져있습니다
+    # 이 블록 내에서 모터 전원이 켜집니다
     motor.track_trajectory(1.57)  # 1.57 rad로 이동
-    # 빠져나오면 자동으로 전원이 꺼집니다
+    # 블록을 벗어나면 자동으로 전원이 꺼집니다
 ```
 
 ### 전원 관리 이해하기
 
 **중요**: 모터 전원은 2단계로 작동합니다:
 
-1. **객체 생성** (연결, 전원 OFF)
+#### 1. 객체 생성 (연결, 전원 OFF)
 ```python
 motor = Motor('AK80-64', motor_id=2, auto_init=True)
 # TMotorManager 객체 생성됨
@@ -78,16 +85,16 @@ motor = Motor('AK80-64', motor_id=2, auto_init=True)
 # 모터 전원은 아직 OFF (모터가 움직이지 않음)
 ```
 
-2. **Enable/With 블록** (전원 ON)
+#### 2. Enable/With 블록 (전원 ON)
 ```python
 with motor as m:  # __enter__() 호출 → enable() → 전원 ON
-    # 이제 모터 전원이 켜짐
+    # 이제 모터 전원이 켜지고 움직일 준비가 됨
     m.track_trajectory(1.57)
-    # with 블록 내내 전원이 유지됨
+    # with 블록 내내 전원 유지
 # __exit__() 호출 → disable() → 전원 OFF
 ```
 
-### 수동 제어
+### 수동 전원 제어
 
 ```python
 motor = Motor('AK80-64', motor_id=2, auto_init=True)
@@ -96,7 +103,6 @@ motor.enable()  # 전원 ON - 이제 모터가 움직일 수 있음
 print(f"전원 상태: {motor.is_power_on()}")  # True
 
 motor.track_trajectory(1.57)
-motor.set_velocity(2.0)
 
 motor.disable()  # 전원 OFF
 print(f"전원 상태: {motor.is_power_on()}")  # False
@@ -106,436 +112,413 @@ print(f"전원 상태: {motor.is_power_on()}")  # False
 
 ### 개요
 
-| 모드 | 함수 | 사용 목적 |
+| 모드 | 함수 | 사용 사례 |
 |------|------|----------|
-| **1. Trajectory** | `track_trajectory()` | 위치 제어, 부드러운 동작 |
-| **2. Velocity** | `set_velocity()` | 일정 속도 회전 |
-| **3. Torque** | `set_torque()` | 힘 제어, 중력 보상 |
-| **4. Impedance** | `send_command()` | 저수준 완전 제어 (전문가용) |
+| **Trajectory** | `track_trajectory()` | 위치 제어, 부드러운 동작 |
+| **Velocity** | `set_velocity()` | 일정 속도 회전 |
+| **Torque** | `set_torque()` | 힘 제어, 중력 보상 |
+| **Impedance** | `send_command()` | 유연한 상호작용, 강성 제어 |
 
-### 모드 1: Trajectory Control (궤적 제어)
+### 1. Trajectory Control (궤적 제어)
 
-자동 궤적 생성을 통한 위치 제어
-
-```python
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 즉시 이동 (step position)
-    motor.track_trajectory(1.57)
-    
-    # 부드러운 궤적 (2초)
-    motor.track_trajectory(1.57, duration=2.0)
-    
-    # 강성 조절
-    motor.track_trajectory(1.57, kp=50, kd=2.0)  # 단단하게
-    motor.track_trajectory(1.57, kp=5, kd=0.3)   # 유연하게
-```
-
-**파라미터:**
-- `position`: 목표 위치 (rad)
-- `kp`: 위치 게인 (Nm/rad) - 높을수록 단단함
-- `kd`: 속도 게인 (Nm/(rad/s)) - 높을수록 댐핑 강함
-- `duration`: 이동 시간 (s) - 0이면 즉시, >0이면 궤적
-- `trajectory_type`: 'minimum_jerk', 'cubic', 'linear', 'trapezoidal'
-
-### 모드 2: Velocity Control (속도 제어)
-
-일정 속도 회전 (피드포워드 토크 없음)
+위치 추적
 
 ```python
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 2 rad/s로 회전
-    motor.set_velocity(2.0)
-    time.sleep(10)
-    
-    # 정지
-    motor.set_velocity(0.0)
-```
-
-**속도 + FF 토크가 필요한 경우:**
-```python
-motor.send_command(
-    position=motor.position,
-    velocity=2.0,
-    kp=0, kd=5.0,
-    torque=gravity_compensation
+motor.track_trajectory(
+    targetPos=1.57,      # 목표 위치 (rad)
+    duration=2.0,        # 동작 시간 (초)
+    kp=10.0,            # 위치 게인 (Nm/rad)
+    kd=2.0,             # 속도 게인 (Nm/(rad/s))
+    trajectoryType='minimum_jerk'  # 궤적 타입
 )
 ```
 
-### 모드 3: Torque Control (토크 제어)
+**사용 시기**: 정밀한 위치 제어 작업, 궤적 추종
 
-위치/속도 피드백 없는 순수 토크 제어
+### 2. Velocity Control (속도 제어)
 
-```python
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 중력 보상
-    motor.set_torque(3.5)
-    
-    # 토크 제거 (자유 움직임)
-    motor.set_torque(0.0)
-```
-
-### 모드 4: Impedance Control (임피던스 제어 - 저수준)
-
-모든 파라미터의 완전 수동 제어 (전문가 모드)
+직접 속도 명령
 
 ```python
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 속도 + FF 토크
-    motor.send_command(
-        position=motor.position,
-        velocity=2.0,
-        kp=0, kd=5.0,
-        torque=gravity_comp
-    )
-    
-    # MPC 제어기 통합
-    for _ in range(1000):
-        p, v, kp, kd, tau = mpc.compute()
-        motor.send_command(p, v, kp, kd, tau)
-        time.sleep(0.01)
+motor.set_velocity(
+    targetVel=3.0,      # 목표 속도 (rad/s)
+    kd=5.0,             # 속도 게인 (Nm/(rad/s))
+    duration=2.0        # 동작 시간 (초)
+)
 ```
+
+**사용 시기**: 연속 회전, 속도 기반 작업
+
+### 3. Torque Control (토크 제어)
+
+직접 토크/힘 제어
+
+```python
+motor.set_torque(
+    targetTor=2.5,        # 목표 토크 (Nm)
+    duration=2.0          # 동작 시간 (초)
+)
+```
+
+**사용 시기**: 힘 제어, 중력 보상, 햅틱
+
+### 4. Impedance Control (임피던스 제어)
+
+가상 스프링-댐퍼 시스템
+
+```python
+motor.send_command(
+    targetPos=0.0,     # 평형 위치 (rad)
+    kp=10.0,           # 강성 (Nm/rad)
+    kd=1.0,            # 댐핑 (Nm/(rad/s))
+    fftor=2.0          # 피드포워드 토크 (Nm)
+)
+```
+
+**사용 시기**: 인간-로봇 상호작용, 유연한 조작
 
 ## 📚 API 레퍼런스
 
 ### Motor 클래스
 
-#### 초기화
+#### 생성자
 
 ```python
-Motor(motor_type='AK80-64', motor_id=1, can_interface='can0', 
-      auto_init=False, config=None)
+Motor(
+    motor_type: str,              # 모터 모델 ('AK80-64', 'AK80-9', 'AK70-10')
+    motor_id: int = 1,            # CAN ID (0-127)
+    can_interface: str = 'can0',  # CAN 인터페이스 이름
+    auto_init: bool = True,       # CAN 인터페이스 자동 초기화
+    bitrate: int = 1000000,       # CAN 비트레이트 (기본: 1Mbps)
+    max_temperature: float = 50.0 # 최대 안전 온도 (°C)
+)
 ```
 
-**파라미터:**
-- `motor_type`: 모터 모델 ('AK80-64', 'AK80-9' 등)
-- `motor_id`: CAN ID (1-32)
-- `can_interface`: CAN 인터페이스 이름 ('can0', 'can1' 등)
-- `auto_init`: True면 initialize() 자동 호출
-- `config`: 고급 설정용 MotorConfig 객체
-
-#### 전원 관리
+#### MotorConfig 사용
 
 ```python
-motor.enable()   # 전원 ON
-motor.disable()  # 전원 OFF
-motor.is_power_on()  # 전원 상태 확인
-motor.get_uptime()   # 전원 켜진 후 경과 시간
+from TMotorAPI import MotorConfig
+
+config = MotorConfig(
+    motorType='AK80-64',
+    motorId=2,
+    canInterface='can0',
+    bitrate=1000000,
+    autoInit=True,
+    maxTemperature=50.0
+)
+
+motor = Motor(config=config)
 ```
 
 #### 제어 메서드
 
+| 메서드 | 파라미터 | 설명 |
+|--------|----------|------|
+| `track_trajectory()` | `position, duration, kp=None, kd=None` | 위치 + 속도 추적 |
+| `set_velocity()` | `velocity, kd=None, duration` | 일정 속도 제어 |
+| `set_torque()` | `torque, duration` | 직접 토크 제어 |
+| `send_command()` | `position=0.0, kp=None, kd=None, fftor` | 임피던스 (스프링-댐퍼) 제어 |
+| `set_zero_position()` | - | 현재 위치를 영점으로 설정 |
+
+#### 상태 메서드
+
 ```python
-# 궤적 제어
-motor.track_trajectory(position, kp=10, kd=0.5, duration=0.0, 
-                      trajectory_type='minimum_jerk')
+# 현재 상태 가져오기 (딕셔너리 반환)
+state = motor.update()
+# 반환값: {'position': float, 'velocity': float, 'torque': float, 'temperature': float}
 
-# 속도 제어
-motor.set_velocity(velocity, kd=5.0)
+# 캐시된 상태 접근
+pos = motor.position
+vel = motor.velocity
+temp = motor.temperature
 
-# 토크 제어
-motor.set_torque(torque)
-
-# 저수준 제어
-motor.send_command(position, velocity, kp, kd, torque=0.0)
+# 상태 확인
+motor.is_power_on()                # True/False 반환
+motor.get_uptime()                 # enable() 호출 이후 경과 시간
 ```
 
-#### 유틸리티 메서드
+#### 전원 관리
 
 ```python
-motor.update()          # 모터 상태 읽기
-motor.zero_position()   # 현재 위치를 0으로 설정
-motor.check_connection()  # 모터 응답 확인
-```
+motor.enable()   # 전원 켜기
+motor.disable()  # 전원 끄기
 
-#### 속성
-
-```python
-motor.position       # 현재 위치 (rad)
-motor.velocity       # 현재 속도 (rad/s)
-motor.torque         # 현재 토크 (Nm)
-motor.temperature    # 현재 온도 (°C)
-motor.is_enabled     # 전원 상태
-```
-
-### MotorGroup 클래스
-
-```python
-# 모터 그룹 생성
-motors = MotorGroup([
-    ('AK80-64', 1),
-    ('AK80-64', 2),
-    ('AK80-9', 3)
-])
-
-# Context manager 사용
-with motors:
-    # 동기화된 동작
-    motors.track_all_trajectory([1.57, 0.0, -1.57], duration=2.0)
-    
-    # 개별 제어
-    motors[0].set_velocity(2.0)
-    motors[1].track_trajectory(1.0)
+# Context manager (자동 전원 관리)
+with motor:
+    # 모터 전원 켜짐
+    pass
+# 모터 전원 꺼짐
 ```
 
 ## 💡 예제
 
-### 예제 1: 기본 위치 제어
+### 예제 1: 간단한 위치 제어
 
 ```python
-from tmotor_control_final import Motor
+from TMotorAPI import Motor
+import time
 
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 1.57 rad로 이동
-    motor.track_trajectory(1.57)
+with Motor('AK80-64', motor_id=1, auto_init=True) as motor:
+    # 90도로 이동
+    motor.track_trajectory(targetPos=1.57, duration=2.0)  # π/2 rad
     time.sleep(2)
     
-    # 0으로 복귀
-    motor.track_trajectory(0.0)
-```
-
-### 예제 2: 부드러운 궤적
-
-```python
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 5초에 걸쳐 부드럽게 이동
-    motor.track_trajectory(3.14, duration=5.0)
-```
-
-### 예제 3: 속도 제어
-
-```python
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    # 10초 동안 회전
-    motor.set_velocity(2.0)
-    time.sleep(10)
-    motor.set_velocity(0.0)
-```
-
-### 예제 4: 다중 모터
-
-```python
-from tmotor_control_final import MotorGroup
-
-motors = MotorGroup([
-    ('AK80-64', 1),
-    ('AK80-64', 2),
-    ('AK80-9', 3)
-])
-
-with motors:
-    # 모든 모터 동시 이동
-    motors.track_all_trajectory([1.57, 0.0, -1.57], duration=2.0)
+    # -90도로 이동
+    motor.track_trajectory(targetPos=-1.57, duration=2.0)
+    time.sleep(2)
     
-    # 위치 확인
-    print(f"위치: {motors.get_positions()}")
+    # 영점으로 복귀
+    motor.track_trajectory(targetPos=0.0, duration=2.0)
 ```
 
-### 예제 5: 전원 상태 모니터링
+### 예제 2: 모니터링이 포함된 속도 제어
 
 ```python
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    print(f"전원 ON: {motor.is_power_on()}")  # True
-    print(f"가동 시간: {motor.get_uptime():.2f}s")
-    
-    motor.track_trajectory(1.57)
-    
-    print(f"여전히 ON: {motor.is_power_on()}")  # True
-    print(f"가동 시간: {motor.get_uptime():.2f}s")
+from TMotorAPI import Motor
+import time
 
-# with 블록 후
-print(f"전원 OFF: {motor.is_power_on()}")  # False
+motor = Motor('AK80-9', motor_id=2, auto_init=True)
+motor.enable()
+
+try:
+    # 3 rad/s로 5초간 회전
+    motor.set_velocity(targetVel=3.0, duration=5.0)
+    
+    for _ in range(50):  # 10Hz로 5초
+        state = motor.update()
+        print(f"속도: {state['velocity']:.2f} rad/s, "
+              f"온도: {state['temperature']:.1f}°C")
+        time.sleep(0.1)
+        
+finally:
+    motor.disable()
 ```
 
-### 예제 6: MPC 통합
+### 예제 3: 임피던스 제어로 유연한 상호작용
 
 ```python
-from your_mpc_library import MPCController
+from TMotorAPI import Motor
+import time
 
-mpc = MPCController()
-
-with Motor('AK80-64', motor_id=2, auto_init=True) as motor:
-    for _ in range(1000):
-        # 최적 제어 계산
-        p, v, kp, kd, tau = mpc.compute(
-            current_state=motor.position,
-            target_state=1.57
+with Motor('AK70-10', motor_id=1, auto_init=True) as motor:
+    # 위치 0에 부드러운 가상 스프링 설정
+    print("모터를 손으로 움직여보세요...")
+    
+    for _ in range(100):
+        motor.send_command(
+            targetPos=0.0,
+            kp=10.0,   # 낮은 강성 = 부드러운 스프링
+            kd=0.5,    # 낮은 댐핑 = 적은 저항
+            fftor=0.0
         )
         
-        # 제어 적용
-        motor.send_command(p, v, kp, kd, tau)
+        state = motor.update()
+        print(f"위치: {state['position']:.3f} rad, "
+              f"토크: {state['torque']:.3f} Nm")
+        time.sleep(0.1)
+```
+
+### 예제 4: 온도 모니터링
+
+```python
+from TMotorAPI import Motor
+import time
+
+motor = Motor('AK80-64', motor_id=1, auto_init=True, max_temperature=45.0)
+
+with motor:
+    motor.set_velocity(targetVel=5.0, duration=10.0)  # 고속
+    
+    while True:
+        state = motor.update()
+        temp = state['temperature']
         
-        time.sleep(0.01)
+        print(f"온도: {temp:.1f}°C")
+        
+        # 자동 안전 점검 (내장)
+        if temp > motor._config.maxTemperature:
+            print("경고: 온도 한계 초과!")
+            break
+            
+        time.sleep(1.0)
+```
+
+### 예제 5: Minimum Jerk 궤적
+
+```python
+from TMotorAPI import Motor
+
+with Motor('AK80-64', motor_id=1, auto_init=True) as motor:
+    # Minimum Jerk 궤적으로 부드러운 동작
+    motor.track_trajectory(
+        targetPos=3.14,              # π rad (180도)
+        duration=3.0,                # 3초간
+        kp=50.0,                     # 높은 위치 게인
+        kd=2.0,                      # 적절한 댐핑
+        trajectoryType='minimum_jerk'
+    )
 ```
 
 ## ❓ FAQ
 
-### Q1: 모터 전원은 언제 실제로 켜지나요?
+<details>
+<summary><b>Q: 어떤 모터들이 지원되나요?</b></summary>
 
-**A:** `enable()`이 호출되거나 `with` 블록에 진입할 때 켜집니다:
+**A:** 현재 MIT CAN 프로토콜을 사용하는 AK 시리즈 모터를 지원합니다:
+- **AK80-64** (높은 토크)
+- **AK80-9** (균형잡힌 성능)
+- **AK70-10** (컴팩트)
+</details>
 
-```python
-motor = Motor(..., auto_init=True)  # 연결됨, 하지만 전원 OFF
-motor.enable()  # 이제 전원이 ON
-```
+<details>
+<summary><b>Q: 서로 다른 CAN 인터페이스에서 여러 모터를 제어할 수 있나요?</b></summary>
 
-```python
-with Motor(...) as motor:  # 여기서 전원 ON
-    pass  # 여기서 전원 OFF
-```
-
-### Q2: 전원이 얼마나 오래 유지되나요?
-
-**A:** 전원은 다음까지 유지됩니다:
-1. `disable()`이 호출되거나
-2. `with` 블록을 빠져나갈 때까지
+**A:** 네! 각 모터에 다른 `can_interface`를 지정하면 됩니다:
 
 ```python
-with motor:
-    # 이 블록 전체에서 전원 ON
-    motor.track_trajectory(1.57)
-    time.sleep(10)
-    motor.set_velocity(2.0)
-    time.sleep(20)
-    # 여기서도 여전히 전원 ON
-# 빠져나올 때 전원 OFF
+motor1 = Motor('AK80-64', motor_id=1, can_interface='can0')
+motor2 = Motor('AK80-9', motor_id=1, can_interface='can1')
 ```
+</details>
 
-### Q3: `auto_init=True`와 `auto_init=False`의 차이는?
+<details>
+<summary><b>Q: update()를 주기적으로 호출해야 하나요?</b></summary>
+
+**A:** 네, 연속 제어를 위해서는 필요합니다. 제어 메서드는 명령을 보내지만 `update()`는 모터 피드백을 읽습니다:
+
+```python
+while running:
+    motor.track_trajectory(target_pos, duration=0.1)
+    state = motor.update()  # 최신 피드백 받기
+    time.sleep(0.01)  # 100 Hz 권장
+```
+</details>
+
+<details>
+<summary><b>Q: 모터 오류를 어떻게 처리하나요?</b></summary>
+
+**A:** API에 오류 처리와 로깅이 포함되어 있습니다:
+
+```python
+try:
+    with motor:
+        motor.set_velocity(10.0, duration=2.0)
+        state = motor.update()
+        
+        if not state:  # 빈 딕셔너리는 오류를 의미
+            print("통신 오류!")
+            
+except Exception as e:
+    print(f"오류: {e}")
+finally:
+    motor.disable()  # 항상 안전하게 호출 가능
+```
+</details>
+
+<details>
+<summary><b>Q: track_trajectory()와 send_command()의 차이는 무엇인가요?</b></summary>
 
 **A:**
-- `auto_init=True`: TMotorManager 객체를 즉시 생성 (모터 연결, 전원 OFF)
-- `auto_init=False`: 첫 `enable()` 호출 시 TMotorManager 생성
+- **`track_trajectory()`**: 능동적 위치 추적 (강성, 정밀)
+- **`send_command()`**: 수동적 유연성 (부드러움, 상호작용)
 
-둘 다 처음에는 전원이 OFF입니다. 전원은 `enable()`이나 `with` 블록에서만 켜집니다.
-
-### Q4: `enable()`과 `with`를 함께 사용할 수 있나요?
-
-**A:** 권장하지 않습니다! `enable()`이 두 번 호출됩니다:
-
-```python
-# ❌ 이렇게 하지 마세요
-motor = Motor(...)
-motor.enable()  # 첫 번째 enable
-with motor:     # 두 번째 enable (나쁨!)
-    pass
-```
-
-**✅ 하나만 선택하세요:**
-```python
-# 방법 1: 수동
-motor.enable()
-motor.track_trajectory(1.57)
-motor.disable()
-
-# 방법 2: Context manager (권장)
-with motor:
-    motor.track_trajectory(1.57)
-```
-
-### Q5: 모터가 여전히 전원이 켜져있는지 어떻게 확인하나요?
-
-**A:** 다음 메서드를 사용하세요:
-```python
-motor.is_power_on()      # 전원이 켜져있으면 True
-motor.get_uptime()       # 전원 켜진 후 경과 시간 (초)
-motor.check_connection() # 응답하는지 확인
-```
+정밀한 위치 제어에는 trajectory를, 안전한 상호작용에는 send_command를 사용하세요.
+</details>
 
 ## 🔧 문제 해결
-
-### 모터가 응답하지 않음
-
-```python
-# 연결 확인
-if not motor.check_connection():
-    print("모터가 응답하지 않습니다!")
-    motor.disable()
-    time.sleep(1)
-    motor.enable()
-```
-
-### 과도한 진동
-
-```python
-# 댐핑(kd) 증가
-motor.track_trajectory(1.57, kp=10, kd=2.0)  # kd 높임
-```
-
-### 너무 유연함
-
-```python
-# 강성(kp) 증가
-motor.track_trajectory(1.57, kp=50, kd=2.0)  # kp 높임
-```
 
 ### CAN 인터페이스를 찾을 수 없음
 
 ```bash
-# 인터페이스 확인
+# 인터페이스가 존재하는지 확인
 ip link show can0
 
-# 수동으로 활성화
-sudo ip link set can0 up type can bitrate 1000000
+# 없다면 Device Tree Overlay 추가 (Raspberry Pi)
+sudo nano /boot/firmware/config.txt
+# 추가: dtoverlay=mcp2515-can0,oscillator=8000000,interrupt=25
+
+# 재부팅
+sudo reboot
+```
+
+### 모터가 응답하지 않음
+
+1. **전원 확인**: 모터 전원 공급 확인 (모델에 따라 24-48V)
+2. **CAN 버스 확인**: 적절한 종단 저항 확인 (양 끝에 120Ω)
+3. **ID 확인**: 모터 CAN ID가 코드와 일치하는지 확인
+4. **Enable 확인**: `enable()`이 호출되었거나 `with` 문을 사용하는지 확인
+
+```python
+# 디버그 모드
+import logging
+logging.basicConfig(level=logging.DEBUG)
+motor = Motor('AK80-64', motor_id=1)
 ```
 
 ### 권한 거부됨
 
 ```bash
-# sudo 권한 설정 (설치 섹션 참조)
-sudo visudo
-# 추가: your_username ALL=(ALL) NOPASSWD: /sbin/ip
+# 사용자를 dialout 그룹에 추가
+sudo usermod -a -G dialout $USER
+
+# 변경사항 적용을 위해 로그아웃 후 로그인
 ```
 
-## 📝 게인 튜닝 가이드
+### 고온 경고
 
-| 목적 | Kp | Kd | 특징 |
-|------|----|----|------|
-| 정밀 제어 | 50 | 2.0 | 단단함, 정확함 |
-| 일반 제어 | 10 | 0.5 | 기본값, 균형 잡힘 |
-| 안전한 상호작용 | 5 | 0.3 | 유연함, 부드러움 |
-| 속도 제어 | 0 | 5.0 | 위치 제어 OFF |
-| 토크 제어 | 0 | 0 | 모든 피드백 OFF |
+- 부하 또는 듀티 사이클 감소
+- 냉각 개선 (히트싱크/팬 추가)
+- 조기 경고를 위해 `max_temperature` 임계값 낮추기
 
-**튜닝 팁:**
-- 진동 → Kd 증가
-- 너무 유연 → Kp 증가
-- 오버슈트 → Kd 증가
-- 느린 응답 → Kp 증가
+### CAN 버스 오류
 
-## 🎓 제어 이론
+```bash
+# CAN 버스 상태 확인
+ip -details -statistics link show can0
 
-모든 제어 모드는 같은 임피던스 제어 방정식을 사용합니다:
-
-```
-τ = Kp × (pos_target - pos_actual) + 
-    Kd × (vel_target - vel_actual) + 
-    τ_feedforward
+# CAN 인터페이스 재설정
+sudo ip link set can0 down
+sudo ip link set can0 up type can bitrate 1000000
 ```
 
-각 모드는 이 5개 파라미터의 조합일 뿐입니다:
+## 🏗️ 아키텍처
 
-| 모드 | pos_target | vel_target | Kp | Kd | τ_ff |
-|------|------------|------------|----|----|------|
-| Position | target | 0 | ✓ | ✓ | 0 |
-| Velocity | current | target | 0 | ✓ | 0 |
-| Torque | 0 | 0 | 0 | 0 | ✓ |
-| Impedance | ✓ | ✓ | ✓ | ✓ | ✓ |
+```
+사용자 애플리케이션
+       ↓
+   TMotorAPI (고수준 래퍼)
+       ↓ 사용
+TMotorCANControl (저수준 CAN 드라이버)
+       ↓
+   SocketCAN
+       ↓
+   CAN 하드웨어
+       ↓
+   T-Motor
+```
 
-## 📄 라이선스
+**설계 철학:**
+- **TMotorCANControl**: 직접 CAN 프로토콜 구현 (저수준)
+- **TMotorAPI**: 안전 기능이 포함된 고수준 추상화 (사용자 친화적)
 
-MIT License - 자세한 내용은 LICENSE 파일 참조
+## 📝 라이선스
 
-## 🤝 기여
-
-기여를 환영합니다! Pull Request를 자유롭게 제출해주세요.
-
-## 📧 연락처
-
-이슈와 질문은 GitHub에서 이슈를 열어주세요.
+MIT License - 자세한 내용은 [LICENSE](LICENSE) 파일 참조
 
 ## 🙏 감사의 말
 
-Neurobionics Lab의 [TMotorCANControl](https://github.com/neurobionics/TMotorCANControl)을 기반으로 제작되었습니다.
+이 라이브러리는 Neurobionics Lab의 [TMotorCANControl](https://github.com/neurobionics/TMotorCANControl)을 기반으로 합니다.
+
+**특별히 감사드립니다:**
+- 기본 CAN 제어 라이브러리를 제공한 [Neurobionics Lab](https://github.com/neurobionics)
+- 오픈 CAN 프로토콜 명세를 제공한 MIT
+- 우수한 모터 하드웨어를 제공한 T-Motor
+
+## 📞 지원
+
+- **이슈**: [GitHub Issues](https://github.com/KR70004526/TMotorAPI/issues)
+- **기본 라이브러리**: [TMotorCANControl](https://github.com/neurobionics/TMotorCANControl)
 
 ---
 
