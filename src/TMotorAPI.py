@@ -1,21 +1,12 @@
 """
-TMotor Control API v4.2 - CORRECT TMotorManager_mit_can Signature
+TMotor Control API v4.3 - With Settling Time for Step Commands
 Based on TMotorCANControl by Neurobionics Lab
 
-Critical Fixes (v4.2):
-- FIXED: TMotorManager_mit_can has NO CAN_bus parameter!
-- CORRECT signature: __init__(motor_type, motor_ID, max_mosfett_temp, CSV_file, log_vars)
-- CAN interface is set up separately via CANInterface.setup_interface()
-- Motor(config=config) works perfectly
-- All control methods properly set control mode
-
-Actual TMotorManager_mit_can.__init__:
-    def __init__(self, 
-                 motor_type='AK80-9', 
-                 motor_ID=1, 
-                 max_mosfett_temp=50, 
-                 CSV_file=None, 
-                 log_vars=LOG_VARIABLES)
+Critical Improvements (v4.3):
+- Added settling time logic for step commands to prevent premature return
+- Prevents drift when using feedforward torque in step commands
+- Position must stay within tolerance for N consecutive cycles before returning
+- More robust step command behavior
 
 Author: TMotor Control Team
 License: MIT
@@ -66,6 +57,9 @@ class MotorConfig:
         defaultKp: Default position gain (Nm/rad)
         defaultKd: Default velocity gain (Nm/(rad/s))
         defaultTorqueLimit: Default torque limit (Nm)
+        stepTimeout: Maximum time for step command (s)
+        stepTolerance: Position tolerance for "reached" (rad)
+        stepSettlingTime: Time to stay within tolerance before confirming arrival (s)
     
     Note:
         canInterface is only used for CANInterface.setup_interface()
@@ -85,6 +79,7 @@ class MotorConfig:
     # Step command parameters
     stepTimeout: float = 5.0        # Maximum time for step command
     stepTolerance: float = 0.05     # Position tolerance for "reached"
+    stepSettlingTime: float = 0.1   # Time to maintain tolerance before confirming (NEW!)
 
     def __post_init__(self):
         """Validate configuration"""
@@ -92,6 +87,8 @@ class MotorConfig:
             raise ValueError(f"motorId must be 0-127, got {self.motorId}")
         if not CAN_INTERFACE_PATTERN.match(self.canInterface):
             raise ValueError(f"Invalid CAN interface: {self.canInterface}")
+        if self.stepSettlingTime < 0:
+            raise ValueError(f"stepSettlingTime must be >= 0, got {self.stepSettlingTime}")
 
 
 # ==================== CAN Interface ====================
@@ -109,16 +106,13 @@ class CANInterface:
         TMotorManager automatically detects the CAN interface after setup.
         """
 
+        # Determine interface and bitrate with proper fallback logic
         if config is not None:
-            if canInterface is None:
-                _interface = config.canInterface
-            if bitrate is None:
-                _bitrate = config.bitrate
+            _interface = canInterface if canInterface is not None else config.canInterface
+            _bitrate = bitrate if bitrate is not None else config.bitrate
         else:
-            if canInterface is None:
-                _interface = 'can0'
-            if bitrate is None:
-                _bitrate = 1000000
+            _interface = canInterface if canInterface is not None else 'can0'
+            _bitrate = bitrate if bitrate is not None else 1000000
 
         if not CAN_INTERFACE_PATTERN.match(_interface):
             raise ValueError(f"Invalid CAN interface: {_interface}")
@@ -403,21 +397,30 @@ class Motor:
         except:
             return False
     
-    def track_trajectory(self,
+    def set_position(self,
                         targetPos: float,
                         duration: float = 0.0,
                         kp: Optional[float] = None,
                         kd: Optional[float] = None,
+                        feedTor: float = 0.0,
                         trajectoryType: str = 'minimum_jerk') -> None:
         """
-        Trajectory control
+        Trajectory control with settling time logic for step commands
         
         Args:
             targetPos: Target position (rad)
-            duration: Motion duration (seconds) [2ND POSITIONAL!]
-            kp: Position gain
-            kd: Velocity gain
+            duration: Motion duration (seconds)
+                     - If <= STEP_COMMAND_THRESHOLD (0.02s): Step command with settling check
+                     - If > STEP_COMMAND_THRESHOLD: Smooth trajectory
+            kp: Position gain (Nm/rad)
+            kd: Velocity gain (Nm/(rad/s))
+            feedTor: Feedforward torque (Nm) - useful for gravity compensation
             trajectoryType: 'minimum_jerk', 'cubic', 'linear'
+        
+        Step Command Behavior:
+            - Position must stay within tolerance for stepSettlingTime seconds
+            - Prevents premature return when using feedforward torque
+            - More robust than simple tolerance check
         """
         if not self._isEnabled or self._manager is None:
             raise RuntimeError("Motor not enabled")
@@ -429,26 +432,52 @@ class Motor:
         
         try:
             # Set control mode
-            self._manager.set_impedance_gains_real_unit(K=kp, B=kd)
+            self._manager.set_impedance_gains_real_unit_full_state_feedback(K=kp, B=kd)
             self._controlModeSet = True
             
+            # ==================== STEP COMMAND ====================
             if duration <= STEP_COMMAND_THRESHOLD:
-                logging.info(f"Step: {self._lastPosition:.3f} → {targetPos:.3f} rad")
+                feedTorStr = f", FF={feedTor:.2f}Nm" if feedTor != 0.0 else ""
+                logging.info(f"Step: {self._lastPosition:.3f} → {targetPos:.3f} rad{feedTorStr}")
                 
                 startTime = time.time()
                 timeout = self.config.stepTimeout
                 tolerance = self.config.stepTolerance
+                settlingTime = self.config.stepSettlingTime
+                
+                # Calculate required cycles for settling
+                requiredCycles = max(1, int(settlingTime / CONTROL_LOOP_PERIOD))
+                settlingCounter = 0
+                
+                logging.info(f"  Settling: {settlingTime:.3f}s ({requiredCycles} cycles @ {CONTROL_LOOP_FREQUENCY}Hz)")
                 
                 while time.time() - startTime < timeout:
                     self._manager.position = targetPos
+                    self._manager.torque = feedTor
                     self.update()
                     
                     error = abs(self._lastPosition - targetPos)
+                    
                     if error < tolerance:
-                        elapsed = time.time() - startTime
-                        logging.info(f"  ✓ Reached in {elapsed:.2f}s: {self._lastPosition:.3f} rad")
-                        logging.info(f"    Error: {error:.4f} rad")
-                        return
+                        settlingCounter += 1
+                        
+                        # Log settling progress (every 10 cycles or when complete)
+                        if settlingCounter % 10 == 0 or settlingCounter >= requiredCycles:
+                            progress = min(100, int(100 * settlingCounter / requiredCycles))
+                            logging.info(f"    Settling: {progress}% ({settlingCounter}/{requiredCycles})")
+                        
+                        # Check if settled
+                        if settlingCounter >= requiredCycles:
+                            elapsed = time.time() - startTime
+                            logging.info(f"  ✓ Reached and STABLE in {elapsed:.2f}s")
+                            logging.info(f"    Final position: {self._lastPosition:.3f} rad")
+                            logging.info(f"    Final error: {error:.4f} rad")
+                            return
+                    else:
+                        # Reset counter if position drifts out of tolerance
+                        if settlingCounter > 0:
+                            logging.info(f"    ⚠ Drift detected! Resetting settling counter ({settlingCounter}→0)")
+                        settlingCounter = 0
                     
                     time.sleep(CONTROL_LOOP_PERIOD)
                 
@@ -457,9 +486,10 @@ class Motor:
                 logging.warning(f"  ⚠ Timeout ({timeout}s)!")
                 logging.warning(f"    Target: {targetPos:.3f}, Current: {self._lastPosition:.3f}")
                 logging.warning(f"    Error: {error:.3f} rad")
+                logging.warning(f"    Settling progress: {settlingCounter}/{requiredCycles} cycles")
                 return
             
-            # Trajectory
+            # ==================== TRAJECTORY ====================
             if trajectoryType == 'minimum_jerk':
                 trajFunc = TrajectoryGenerator.minimum_jerk
             elif trajectoryType == 'cubic':
@@ -472,7 +502,8 @@ class Motor:
             startPos = self._lastPosition
             t0 = time.time()
             
-            logging.info(f"Traj: {startPos:.3f} → {targetPos:.3f} rad ({duration:.2f}s)")
+            feedTorStr = f", FF={feedTor:.2f}Nm" if feedTor != 0.0 else ""
+            logging.info(f"Traj: {startPos:.3f} → {targetPos:.3f} rad ({duration:.2f}s{feedTorStr})")
             
             while True:
                 t = time.time() - t0
@@ -482,15 +513,20 @@ class Motor:
                 p, v = trajFunc(startPos, targetPos, t, duration)
                 
                 self._manager.position = p
+                self._manager.torque = feedTor
                 self.update()
                 
                 time.sleep(CONTROL_LOOP_PERIOD)
             
             # Final
             self._manager.position = targetPos
+            self._manager.torque = feedTor
             self.update()
             
-            logging.info(f"  ✓ Complete: {self._lastPosition:.3f} rad")
+            finalError = abs(self._lastPosition - targetPos)
+            logging.info(f"  ✓ Trajectory complete")
+            logging.info(f"    Final position: {self._lastPosition:.3f} rad")
+            logging.info(f"    Final error: {finalError:.4f} rad")
             
         except Exception as e:
             logging.error(f"Trajectory failed: {e}")
@@ -566,30 +602,6 @@ class Motor:
                 
         except Exception as e:
             logging.error(f"Torque failed: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-    
-    def send_command(self,
-                    targetPos: float,
-                    kp: float,
-                    kd: float,
-                    fftor: float = 0.0) -> None:
-        """Low-level impedance control"""
-        if not self._isEnabled or self._manager is None:
-            raise RuntimeError("Motor not enabled")
-        
-        try:
-            self._manager.set_impedance_gains_real_unit_full_state_feedback(K=kp, B=kd)
-            self._controlModeSet = True
-            
-            self._manager.position = targetPos
-            self._manager.torque = fftor
-            
-            self.update()
-            
-        except Exception as e:
-            logging.error(f"Command failed: {e}")
             import traceback
             traceback.print_exc()
             raise
