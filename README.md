@@ -79,6 +79,10 @@ cd TMotorAPI
 
 # Copy to your project
 cp src/TMotorAPI.py your_project/
+
+# Install the API using pip
+python3 -m pip install -e . --break-system-packages # Type this in TMotorAPI folder where pyproject.toml file exist.
+# This will download API with editor version --> If you change the code, then it will automatically upload without download.
 ```
 
 ## ⚡ Quick Start
